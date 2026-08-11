@@ -1,4 +1,5 @@
 # DocRAG
+<img width="1470" height="831" alt="Screenshot 2026-08-11 at 9 22 34 PM" src="https://github.com/user-attachments/assets/3bc25998-a751-4b76-99b5-ebf31ca28424" />
 
 RAG-based question answering over technical PDFs, with **hybrid retrieval (BM25 + vector search)**.
 
@@ -11,7 +12,7 @@ PDF → PyMuPDF parsing → sliding-window chunking (900 chars, 150 overlap)
     → MiniLM embeddings → ChromaDB (vector index)
     → BM25 index (rank_bm25)
     → hybrid retrieval: score = 0.6·vector + 0.4·BM25 (min-max normalized)
-    → Gemini 2.0 Flash answer, grounded in retrieved chunks, with page citations
+    → Gemini 3.5 Flash answer, grounded in retrieved chunks, with page citations
 ```
 
 ## Why hybrid search
