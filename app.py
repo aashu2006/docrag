@@ -1,16 +1,24 @@
 """DocRAG - Streamlit UI. Run: streamlit run app.py"""
 
 import os
+import re
 import tempfile
 import streamlit as st
 from rag import parse_pdf, chunk_pages, Index, answer
 
-st.set_page_config(page_title="DocRAG", page_icon="📄")
-st.title("📄 DocRAG")
-st.caption("Hybrid-search RAG over technical PDFs — BM25 + vector retrieval, Gemini answers")
+st.set_page_config(page_title="DocRAG")
+st.title("DocRAG")
+st.caption("Hybrid-search RAG over technical PDFs: BM25 + vector retrieval, Gemini answers")
 
 if "index" not in st.session_state:
     st.session_state.index = None
+
+
+# Streamlit reruns the whole script on every click, so without this the same
+# question gets sent to Gemini again each time.
+@st.cache_data(max_entries=200, show_spinner=False)
+def cached_answer(query: str, hits: list[dict]) -> str:
+    return answer(query, hits)
 
 with st.sidebar:
     st.header("Document")
@@ -20,19 +28,24 @@ with st.sidebar:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
                 f.write(uploaded.read())
                 path = f.name
-            pages = parse_pdf(path)
-            chunks = chunk_pages(pages)
-            idx = Index()
-            idx.build(chunks)
+            try:
+                pages = parse_pdf(path)
+                chunks = chunk_pages(pages)
+                idx = Index()
+                idx.build(chunks)
+            finally:
+                os.unlink(path)
             st.session_state.index = idx
-            os.unlink(path)
         st.success(f"Indexed {len(pages)} pages → {len(chunks)} chunks")
 
     st.divider()
-    st.markdown(
-        "**Pipeline:** PyMuPDF parsing → sliding-window chunking → "
-        "MiniLM embeddings → ChromaDB → hybrid retrieval "
-        "(0.6·vector + 0.4·BM25) → Gemini answer with page citations"
+    st.markdown("**How it works**")
+    st.caption(
+        "1. Reads the PDF page by page\n"
+        "2. Splits each page into overlapping chunks\n"
+        "3. Scores chunks by keywords (BM25) and by meaning (MiniLM embeddings)\n"
+        "4. Mixes the two: 60% meaning, 40% keywords\n"
+        "5. Gemini answers from the top 5 chunks and cites pages"
     )
 
 query = st.text_input("Ask a question about the document")
@@ -45,12 +58,15 @@ if query:
             hits = st.session_state.index.search(query)
         with st.spinner("Generating answer..."):
             try:
-                ans = answer(query, hits)
+                ans = cached_answer(query, hits)
                 st.markdown("### Answer")
                 st.write(ans)
             except KeyError:
                 st.error("Set GEMINI_API_KEY env var to enable answer generation.")
-                ans = None
+            except Exception as exc:
+                # error text can include the request URL, and the key is in it
+                msg = re.sub(r"AIza[0-9A-Za-z_\-]{10,}", "<key>", str(exc))
+                st.error(f"Couldn't get an answer from Gemini: {msg}")
 
         st.markdown("### Retrieved chunks")
         for h in hits:

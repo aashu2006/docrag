@@ -1,43 +1,39 @@
 # DocRAG
-<img width="1470" height="831" alt="Screenshot 2026-08-11 at 9 22 34 PM" src="https://github.com/user-attachments/assets/3bc25998-a751-4b76-99b5-ebf31ca28424" />
+<img width="1470" height="831" alt="Screenshot 2026-08-11 at 9 22 34 PM" src="https://github.com/user-attachments/assets/3bc25998-a751-4b76-99b5-ebf31ca28424" />
 
-RAG-based question answering over technical PDFs, with **hybrid retrieval (BM25 + vector search)**.
+Ask questions about a technical PDF and get answers with page numbers.
 
-Built to explore how retrieval quality changes when lexical and semantic search are fused, motivated by earlier work using LLMs to extract implementation-defined parameters from the RISC-V Privileged Spec, where pure semantic retrieval often missed exact-term matches (register names, CSR fields).
+I got the idea while using LLMs to pull parameters out of the RISC-V Privileged Spec. Plain embedding search kept missing exact names like `stvec` or `MTVEC_MODE`, because to an embedding model those are basically noise. So DocRAG mixes keyword search (BM25) with vector search and shows you the chunks it picked and their scores.
 
-## Pipeline
+## How it works
 
-```
-PDF → PyMuPDF parsing → sliding-window chunking (900 chars, 150 overlap)
-    → MiniLM embeddings → ChromaDB (vector index)
-    → BM25 index (rank_bm25)
-    → hybrid retrieval: score = 0.6·vector + 0.4·BM25 (min-max normalized)
-    → Gemini 3.5 Flash answer, grounded in retrieved chunks, with page citations
-```
+1. PyMuPDF pulls the text out page by page.
+2. Each page gets cut into 900 character chunks with 150 characters of overlap. Chunks never cross pages, so every answer can point to a page.
+3. Chunks are embedded locally with `all-MiniLM-L6-v2` and stored in Chroma. A BM25 index is built over the same chunks.
+4. For a question, both scores get scaled to 0..1 and mixed: `0.6 * vector + 0.4 * bm25`. They're on totally different scales otherwise.
+5. The top 5 chunks go to Gemini 3.5 Flash, which answers only from them and cites pages.
 
-## Why hybrid search
-
-Technical documents are full of exact identifiers (`stvec`, `MTVEC_MODE`, part numbers) that embedding models treat as noise. BM25 catches exact-term matches; vector search catches paraphrases and conceptual questions. Fusing both gives better recall than either alone.
-
-## Run
+## Run it
 
 ```bash
 pip install -r requirements.txt
-export GEMINI_API_KEY=your_key   # answers need this; retrieval works without it
+export GEMINI_API_KEY=your_key
 streamlit run app.py
 ```
 
-Upload a PDF, index it, ask questions. Retrieved chunks are shown with pages and fusion scores so retrieval quality is inspectable.
+Upload a PDF, hit index, ask away. Search works without a key, you just won't get the written answer.
 
-## Design choices
+## Tests
 
-- **Chunking:** character-based sliding window with overlap. Simple, predictable, keeps page metadata for citations.
-- **Embeddings:** `all-MiniLM-L6-v2`, runs locally, no API cost for indexing.
-- **Fusion:** min-max normalization of both score distributions before weighted sum (α = 0.6 toward vector). Raw BM25 and cosine scores live on different scales, so normalization is required before fusing.
-- **Grounding:** the LLM is instructed to answer only from context and cite page numbers, and to say when the context doesn't contain the answer.
+```bash
+pip install pytest
+pytest
+```
 
-## Next steps
+They build a small RISC-V PDF on the fly, so no key needed.
 
-- Reranking retrieved chunks with a cross-encoder
-- OCR path for scanned PDFs (Tesseract)
-- Retrieval evaluation harness (recall@k on a labeled question set)
+## Todo
+
+- rerank the top chunks with a cross-encoder
+- OCR for scanned PDFs
+- a small labeled question set to measure recall@k
